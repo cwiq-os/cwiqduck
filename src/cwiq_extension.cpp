@@ -384,6 +384,17 @@ S3RedirectInfo ConvertLocalPathToS3(const string& local_path) {
 
 
 void CwiqExtension::Load(DuckDB &db) {
+
+    // Force load httpfs first
+    Connection con(db);
+    auto result = con.Query("LOAD httpfs");
+    if (result->HasError()) {
+        std::cout << "Warning: Could not load httpfs: " << result->GetError() << std::endl;
+        // Try to install and load
+        con.Query("INSTALL httpfs");
+        con.Query("LOAD httpfs");
+    }
+
 	std::cout << "CWIQ extension enabled" << std::endl;
 
     auto s3_redirect_fs = make_uniq<S3RedirectProtocolFileSystem>(*db.instance);
