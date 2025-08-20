@@ -131,19 +131,9 @@ public:
     DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path,
                                               FileOpenFlags flags,
                                               optional_ptr<FileOpener> opener = nullptr) override {
-
-        // Only handle paths that start with our protocol
-        if (!StringUtil::StartsWith(path, "s3redirect://")) {
-            throw InvalidInputException("S3RedirectProtocolFileSystem can only handle s3redirect:// URLs, received " + path);
-        }
-
-        // Extract the local path from the protocol URL
-        // s3redirect://path/to/file.parquet -> path/to/file.parquet
-        string local_path = path.substr(13); // Remove "s3redirect://"
-
         try {
             // Convert local path to S3 info using your service
-            auto s3_info = ConvertLocalPathToS3(local_path);
+            auto s3_info = ConvertLocalPathToS3(path);
 
             // Return S3 redirect handle with metadata
             return make_uniq<S3RedirectFileHandle>(*this, db_instance, s3_info.s3_url,
@@ -161,13 +151,8 @@ public:
 	}
 
     bool FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) override {
-        if (!StringUtil::StartsWith(filename, "s3redirect://")) {
-            return false;
-        }
-
-        string local_path = filename.substr(13);
         try {
-            ConvertLocalPathToS3(local_path);
+            ConvertLocalPathToS3(filename);
             return true;
         } catch (...) {
             return false;
@@ -178,7 +163,7 @@ public:
     // DuckDB will only call the ones relevant to our protocol
 
     bool CanHandleFile(const string &fpath) override {
-        return StringUtil::StartsWith(fpath, "s3redirect://");
+        return true;
     }
 
     // Minimal implementations for required methods
@@ -248,7 +233,6 @@ public:
 	}
 
     vector<OpenFileInfo> Glob(const string &path, FileOpener* opener = nullptr) override {
-		string local_path = path.substr(13); // Remove "s3redirect://"
 
 		// Use DuckDB's LocalFileSystem to do the actual globbing
 		LocalFileSystem local_fs;
@@ -257,12 +241,11 @@ public:
 
 		try {
 			// Get matching files from local filesystem
-			auto local_files = local_fs.Glob(local_path, nullptr);
+			auto local_files = local_fs.Glob(path, nullptr);
 
 			// Transform paths to use s3redirect:// protocol
 			for (const auto& local_file : local_files) {
-				OpenFileInfo info("s3redirect://" + local_file.path);
-
+				OpenFileInfo info(local_file.path);
 				result.push_back(info);
 			}
 		} catch (const std::exception& e) {
@@ -314,8 +297,7 @@ static void S3RedirectUrlFunction(DataChunk &args, ExpressionState &state, Vecto
 
     for (idx_t i = 0; i < args.size(); i++) {
         string local_path = local_path_data[i].GetString();
-        string s3redirect_url = "s3redirect://" + local_path;
-        result_data[i] = StringVector::AddString(result, s3redirect_url);
+        result_data[i] = StringVector::AddString(result, local_path);
     }
 }
 
