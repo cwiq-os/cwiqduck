@@ -163,7 +163,13 @@ public:
     // DuckDB will only call the ones relevant to our protocol
 
     bool CanHandleFile(const string &fpath) override {
-        return true;
+        if (StringUtil::StartsWith(fpath, "http")) // Check if file is already a URL
+          return false;
+
+        // Check if file is in CWIQFS
+        const char* xattr_name = "system.cwiqfs.s3_url";
+        ssize_t size = getxattr(fpath.c_str(), xattr_name, nullptr, 0);
+        return size > 0;
     }
 
     // Minimal implementations for required methods
@@ -289,18 +295,6 @@ public:
 
 };
 
-// Optional: Helper scalar function to make URL construction easier
-static void S3RedirectUrlFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-    auto &local_path_vector = args.data[0];
-    auto local_path_data = FlatVector::GetData<string_t>(local_path_vector);
-    auto result_data = FlatVector::GetData<string_t>(result);
-
-    for (idx_t i = 0; i < args.size(); i++) {
-        string local_path = local_path_data[i].GetString();
-        result_data[i] = StringVector::AddString(result, local_path);
-    }
-}
-
 // You need to implement this function based on your service
 S3RedirectInfo ConvertLocalPathToS3(const string& local_path) {
     S3RedirectInfo info;
@@ -386,12 +380,6 @@ void CwiqExtension::Load(DuckDB &db) {
     // register this differently depending on DuckDB's internal API
     db.GetFileSystem().RegisterSubSystem(std::move(s3_redirect_fs));
 
-    // Optional: Register a helper function to create s3redirect URLs
-    ScalarFunction s3redirect_url_func("s3redirect_url",
-									   {LogicalType::VARCHAR},
-									   LogicalType::VARCHAR,
-									   S3RedirectUrlFunction);
-    ExtensionUtil::RegisterFunction(*db.instance, s3redirect_url_func);
 }
 std::string CwiqExtension::Name() {
 	       return "cwiq";
