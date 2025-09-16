@@ -11,8 +11,11 @@
 #include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
+#ifdef __linux__
 #include <sys/xattr.h>
 #include <sys/stat.h>
+#endif
+
 #include <errno.h>
 #include <cstring>
 
