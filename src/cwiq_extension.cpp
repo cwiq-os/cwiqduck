@@ -258,8 +258,10 @@ void CwiqExtension::Load(ExtensionLoader &loader) {
 }
 } // namespace duckdb
 
+extern "C" {
 DUCKDB_CPP_EXTENSION_ENTRY(cwiq, loader) {
 	duckdb::LoadInternal(loader.GetDatabaseInstance());
+}
 }
 
 #ifndef DUCKDB_EXTENSION_MAIN
