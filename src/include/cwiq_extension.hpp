@@ -45,7 +45,7 @@ public:
 	idx_t GetFileSize();
 	bool CanSeek();
 	void Sync();
-	void Write(void *buffer, idx_t nr_bytes, idx_t location);
+	void Write(void *buffer, idx_t nr_bytes);
 	int64_t Write(void *buffer, idx_t nr_bytes);
 	void Truncate(int64_t new_size);
 };
@@ -84,7 +84,7 @@ public:
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");
 	};
 
-	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override {
+	void Write(FileHandle &handle, void *buffer) override {
 		throw NotImplemented(__func__);
 	};
 	void CreateDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {

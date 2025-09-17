@@ -66,8 +66,8 @@ timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
 	return last_modified_time;
 }
 
-void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes, idx_t location) {
-	return GetS3Handle().Write(buffer, nr_bytes, location);
+void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes) {
+	return GetS3Handle().Write(buffer, nr_bytes);
 }
 
 int64_t S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes) {
@@ -253,19 +253,15 @@ std::string CwiqExtension::Version() const {
 #endif
 }
 
-} // namespace duckdb
-
-extern "C" {
-
-DUCKDB_EXTENSION_API void cwiq_init(duckdb::DatabaseInstance &db) {
+static void LoadInternal(DatabaseInstance &db) {
 	duckdb::DuckDB db_wrapper(db);
 	db_wrapper.LoadExtension<duckdb::CwiqExtension>();
 }
 
-DUCKDB_EXTENSION_API const char *cwiq_version() {
-	return duckdb::DuckDB::LibraryVersion();
+DUCKDB_CPP_EXTENSION_ENTRY(cwiq, loader) {
+	duckdb::LoadInternal(loader);
 }
-}
+} // namespace duckdb
 
 #ifndef DUCKDB_EXTENSION_MAIN
 #error DUCKDB_EXTENSION_MAIN not defined
