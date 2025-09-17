@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.5)
-option(DUCKDB_WASM_EXTENSIONS "Whether compiling for Wasm target" OFF)
 
 # Set extension name here
 set(TARGET_NAME cwiq)
