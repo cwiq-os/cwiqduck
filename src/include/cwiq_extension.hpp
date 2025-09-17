@@ -84,7 +84,7 @@ public:
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");
 	};
 
-	void Write(FileHandle &handle, void *buffer) override {
+	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override {
 		throw NotImplemented(__func__);
 	};
 	void CreateDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
