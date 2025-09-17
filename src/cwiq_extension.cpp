@@ -21,240 +21,146 @@
 
 namespace duckdb {
 
-struct S3RedirectInfo {
-	string s3_url;
-	idx_t content_length {0};
-	time_t last_modified_time;
-};
-
-S3RedirectInfo ConvertLocalPathToS3(const string &local_path);
-
-class S3RedirectFileHandle : public FileHandle {
-private:
-	string s3_url;
-	idx_t known_content_length;
-	time_t last_modified_time;
-	unique_ptr<FileHandle> s3_handle;
-	optional_ptr<FileOpener> file_opener;
-	DatabaseInstance &db_instance;
-
-public:
-	S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &s3_url, idx_t content_length,
-	                     time_t last_modified, optional_ptr<FileOpener> opener)
-	    : FileHandle(fs, s3_url, FileFlags::FILE_FLAGS_READ), s3_url(s3_url), known_content_length(content_length),
-	      last_modified_time(last_modified), file_opener(opener), db_instance(db) {
+// Lazy-load the actual S3 handle when needed
+FileHandle &S3RedirectFileHandle::GetS3Handle() {
+	if (!s3_handle) {
+		// Let DuckDB's httpfs handle the S3 URL
+		auto &main_fs = FileSystem::GetFileSystem(db_instance);
+		s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ, nullptr);
 	}
+	return *s3_handle;
+}
 
-	virtual ~S3RedirectFileHandle() {
+idx_t S3RedirectFileHandle::GetFileSize() {
+	return known_content_length;
+}
+
+void S3RedirectFileHandle::Close() {
+	if (s3_handle) {
+		s3_handle->Close();
 	}
+}
 
-	// Lazy-load the actual S3 handle when needed
-	FileHandle &GetS3Handle() {
-		if (!s3_handle) {
-			// Let DuckDB's httpfs handle the S3 URL
-			auto &main_fs = FileSystem::GetFileSystem(db_instance);
-			s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ, nullptr);
-		}
-		return *s3_handle;
+void S3RedirectFileHandle::Read(void *buffer, idx_t nr_bytes, idx_t location) {
+	return GetS3Handle().Read(buffer, nr_bytes, location);
+}
+
+int64_t S3RedirectFileHandle::Read(void *buffer, idx_t nr_bytes) {
+	return GetS3Handle().Read(buffer, nr_bytes);
+}
+
+bool S3RedirectFileHandle::CanSeek() {
+	return true;
+}
+
+void S3RedirectFileHandle::Sync() {
+	if (s3_handle)
+		s3_handle->Sync();
+}
+
+FileType S3RedirectFileHandle::GetType() {
+	return GetS3Handle().GetType();
+}
+
+time_t S3RedirectFileHandle::GetLastModifiedTime() {
+	return last_modified_time;
+}
+
+void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes, idx_t location) {
+	return GetS3Handle().Write(buffer, nr_bytes, location);
+}
+
+int64_t S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes) {
+	return GetS3Handle().Write(buffer, nr_bytes);
+}
+
+void S3RedirectFileHandle::Truncate(int64_t new_size) {
+	return GetS3Handle().Truncate(new_size);
+}
+
+DUCKDB_API unique_ptr<FileHandle> S3RedirectProtocolFileSystem::OpenFile(const string &path, FileOpenFlags flags,
+                                                                         optional_ptr<FileOpener> opener = nullptr) {
+	try {
+		auto s3_info = ConvertLocalPathToS3(path);
+		return make_uniq<S3RedirectFileHandle>(*this, db_instance, s3_info.s3_url, s3_info.content_length,
+		                                       s3_info.last_modified_time, opener);
+	} catch (const std::exception &e) {
+		throw IOException("Failed to redirect to S3: " + string(e.what()));
 	}
+}
 
-	idx_t GetFileSize() {
-		return known_content_length;
-	}
-
-	void Close() override {
-		if (s3_handle) {
-			s3_handle->Close();
-		}
-	}
-
-	void Read(void *buffer, idx_t nr_bytes, idx_t location) {
-		return GetS3Handle().Read(buffer, nr_bytes, location);
-	}
-
-	int64_t Read(void *buffer, idx_t nr_bytes) {
-		return GetS3Handle().Read(buffer, nr_bytes);
-	}
-
-	bool CanSeek() {
+bool S3RedirectProtocolFileSystem::FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) {
+	try {
+		ConvertLocalPathToS3(filename);
 		return true;
+	} catch (...) {
+		return false;
 	}
+}
 
-	void Sync() {
-		if (s3_handle) {
-			s3_handle->Sync();
-		}
-	}
-
-	FileType GetType() {
-		return GetS3Handle().GetType();
-	}
-
-	time_t GetLastModifiedTime() {
-		return last_modified_time;
-	}
-
-	// Write operations (probably not needed for your use case)
-	void Write(void *buffer, idx_t nr_bytes, idx_t location) {
-		return GetS3Handle().Write(buffer, nr_bytes, location);
-	}
-
-	int64_t Write(void *buffer, idx_t nr_bytes) {
-		return GetS3Handle().Write(buffer, nr_bytes);
-	}
-
-	void Truncate(int64_t new_size) {
-		return GetS3Handle().Truncate(new_size);
-	}
-};
-
-// Custom FileSystem that only handles our special protocol
-class S3RedirectProtocolFileSystem : public FileSystem {
-private:
-	DatabaseInstance &db_instance;
-
-public:
-	S3RedirectProtocolFileSystem(DatabaseInstance &db) : db_instance(db) {
-	}
-
-	DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags,
-	                                           optional_ptr<FileOpener> opener = nullptr) override {
-		try {
-			// Convert local path to S3 info using your service
-			auto s3_info = ConvertLocalPathToS3(path);
-
-			// Return S3 redirect handle with metadata
-			return make_uniq<S3RedirectFileHandle>(*this, db_instance, s3_info.s3_url, s3_info.content_length,
-			                                       s3_info.last_modified_time, opener);
-
-		} catch (const std::exception &e) {
-			throw IOException("Failed to redirect to S3: " + string(e.what()));
-		}
-	}
-
-	std::string GetName() const override {
-		return "s3redirect";
-	}
-
-	bool FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) override {
-		try {
-			ConvertLocalPathToS3(filename);
-			return true;
-		} catch (...) {
-			return false;
-		}
-	}
-
-	bool CanHandleFile(const string &fpath) override {
+bool S3RedirectProtocolFileSystem::CanHandleFile(const string &fpath) {
 #ifdef __linux__
-		if (StringUtil::StartsWith(fpath, "http")) // Check if file is already a URL
-			return false;
+	if (StringUtil::StartsWith(fpath, "http")) // Check if file is already a URL
+		return false;
 
-		// Check if file is in CWIQFS
-		const char *xattr_name = "system.cwiqfs.s3_url";
-		ssize_t size = getxattr(fpath.c_str(), xattr_name, nullptr, 0);
-		return size > 0;
+	// Check if file is in CWIQFS
+	const char *xattr_name = "system.cwiqfs.s3_url";
+	ssize_t size = getxattr(fpath.c_str(), xattr_name, nullptr, 0);
+	return size > 0;
 #else
-		return false;
+	return false;
 #endif
-	}
+}
 
-	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override {
-		auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-		if (s3_handle) {
-			return s3_handle->GetS3Handle().Read(buffer, nr_bytes, location);
-		}
-		throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+void S3RedirectProtocolFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
+	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (s3_handle) {
+		return s3_handle->GetS3Handle().Read(buffer, nr_bytes, location);
 	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
 
-	int64_t Read(FileHandle &handle, void *buffer, int64_t nr_bytes) override {
-		auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-		if (s3_handle) {
-			return s3_handle->GetS3Handle().Read(buffer, nr_bytes);
-		}
-		throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+int64_t S3RedirectProtocolFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes) {
+	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (s3_handle) {
+		return s3_handle->GetS3Handle().Read(buffer, nr_bytes);
 	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
 
-	// Other methods can throw "not supported" errors since they're not relevant
-	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override {
-		throw NotImplementedException("Write not supported for s3redirect:// protocol");
+void S3RedirectProtocolFileSystem::Seek(FileHandle &handle, idx_t location) {
+	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (s3_handle) {
+		return s3_handle->GetS3Handle().Seek(location);
 	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
 
-	int64_t Write(FileHandle &handle, void *buffer, int64_t nr_bytes) override {
-		throw NotImplementedException("Write not supported for s3redirect:// protocol");
+int64_t S3RedirectProtocolFileSystem::GetFileSize(FileHandle &handle) {
+	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (s3_handle) {
+		return s3_handle->GetFileSize();
 	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
 
-	void CreateDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplementedException("CreateDirectory not supported for s3redirect:// protocol");
-	}
+FileType S3RedirectProtocolFileSystem::GetFileType(FileHandle &handle) {
+	return FileType::FILE_TYPE_REGULAR;
+}
 
-	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
-		return false;
+void S3RedirectProtocolFileSystem::FileSync(FileHandle &handle) {
+	if (auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle)) {
+		s3_handle->Sync();
 	}
+}
 
-	void RemoveDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplementedException("RemoveDirectory not supported for s3redirect:// protocol");
+time_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
+	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (s3_handle) {
+		return s3_handle->GetLastModifiedTime();
 	}
-
-	bool ListFiles(const string &directory, const std::function<void(const string &, bool)> &callback,
-	               FileOpener *opener = nullptr) override {
-		throw NotImplementedException("ListFiles not supported for s3redirect:// protocol");
-	}
-
-	void MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplementedException("MoveFile not supported for s3redirect:// protocol");
-	}
-
-	void RemoveFile(const string &filename, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplementedException("RemoveFile not supported for s3redirect:// protocol");
-	}
-
-	bool CanSeek() override {
-		return true;
-	}
-
-	bool OnDiskFile(FileHandle &handle) override {
-		return false;
-	}
-
-	void Seek(FileHandle &handle, idx_t location) override {
-		auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-		if (s3_handle) {
-			return s3_handle->GetS3Handle().Seek(location);
-		}
-		throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
-	}
-
-	int64_t GetFileSize(FileHandle &handle) override {
-		auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-		if (s3_handle) {
-			return s3_handle->GetFileSize();
-		}
-		throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
-	}
-
-	FileType GetFileType(FileHandle &handle) override {
-		return FileType::FILE_TYPE_REGULAR;
-	}
-
-	void FileSync(FileHandle &handle) override {
-		if (auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle)) {
-			s3_handle->Sync();
-		}
-	}
-
-	void Truncate(FileHandle &handle, int64_t new_size) override {
-		throw NotImplementedException("Truncate not supported for s3redirect:// protocol");
-	}
-
-	time_t GetLastModifiedTime(FileHandle &handle) override {
-		auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-		if (s3_handle) {
-			return s3_handle->GetLastModifiedTime();
-		}
-		throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
-	}
-};
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
 
 S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 #ifndef __linux__
