@@ -78,8 +78,8 @@ void S3RedirectFileHandle::Truncate(int64_t new_size) {
 	return GetS3Handle().Truncate(new_size);
 }
 
-DUCKDB_API unique_ptr<FileHandle> 
-S3RedirectProtocolFileSystem::OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener) {
+DUCKDB_API unique_ptr<FileHandle> S3RedirectProtocolFileSystem::OpenFile(const string &path, FileOpenFlags flags,
+                                                                         optional_ptr<FileOpener> opener) {
 	try {
 		auto s3_info = ConvertLocalPathToS3(path);
 		return make_uniq<S3RedirectFileHandle>(*this, db_instance, s3_info.s3_url, s3_info.content_length,
