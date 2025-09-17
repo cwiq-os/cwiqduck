@@ -33,7 +33,7 @@ public:
 	    : FileHandle(fs, s3_url, FileFlags::FILE_FLAGS_READ), s3_url(s3_url), known_content_length(content_length),
 	      last_modified_time(last_modified), file_opener(opener), db_instance(db) {
 	}
-	virtual ~S3RedirectFileHandle();
+	virtual ~S3RedirectFileHandle() {};
 
 	void Close() override;
 
@@ -57,9 +57,12 @@ private:
 public:
 	S3RedirectProtocolFileSystem(DatabaseInstance &db) : db_instance(db) {};
 
-	DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener = nullptr) override;
+	DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags,
+	                                           optional_ptr<FileOpener> opener = nullptr) override;
 
-	std::string GetName() const override {return "s3redirect";};
+	std::string GetName() const override {
+		return "s3redirect";
+	};
 	bool FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) override;
 	bool CanHandleFile(const string &fpath) override;
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
