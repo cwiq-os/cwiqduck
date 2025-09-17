@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
+option(DUCKDB_WASM_EXTENSIONS "Whether compiling for Wasm target" OFF)
 
 # Set extension name here
 set(TARGET_NAME cwiq)
@@ -15,6 +16,12 @@ project(${TARGET_NAME})
 include_directories(src/include)
 
 set(EXTENSION_SOURCES src/cwiq_extension.cpp)
+
+if (DUCKDB_WASM_EXTENSION)
+	add_library(${EXTENSION_NAME} STATIC ${EXTENSION_SOURCES})
+else()
+	add_library(${EXTENSION_NAME} SHARED ${EXTENSION_SOURCES})
+endif()
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
