@@ -45,7 +45,7 @@ public:
 	idx_t GetFileSize();
 	bool CanSeek();
 	void Sync();
-	void Write(void *buffer, idx_t nr_bytes);
+	void Write(void *buffer, idx_t nr_bytes, idx_t location);
 	int64_t Write(void *buffer, idx_t nr_bytes);
 	void Truncate(int64_t new_size);
 };

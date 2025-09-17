@@ -66,7 +66,7 @@ timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
 	return last_modified_time;
 }
 
-void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes) {
+void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes, idx_t location) {
 	return GetS3Handle().Write(buffer, nr_bytes);
 }
 
@@ -218,7 +218,23 @@ S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 #endif
 }
 
-void CwiqExtension::Load(DuckDB &db) {
+void CwiqExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader.GetDatabaseInstance());
+}
+
+std::string CwiqExtension::Name() {
+	return "cwiq";
+}
+
+std::string CwiqExtension::Version() const {
+#ifdef EXT_VERSION_CWIQ
+	return EXT_VERSION_CWIQ;
+#else
+	return "";
+#endif
+}
+
+static void LoadInternal(DatabaseInstance &db) {
 #ifndef __linux__
 	std::cout << "Error: CWIQ extension not implemented for non-Linux platforms.";
 	return;
@@ -241,27 +257,11 @@ void CwiqExtension::Load(DuckDB &db) {
 	// Register the filesystem with DuckDB for the s3redirect:// protocol
 	db.GetFileSystem().RegisterSubSystem(std::move(s3_redirect_fs));
 }
-std::string CwiqExtension::Name() {
-	return "cwiq";
-}
-
-std::string CwiqExtension::Version() const {
-#ifdef EXT_VERSION_CWIQ
-	return EXT_VERSION_CWIQ;
-#else
-	return "";
-#endif
-}
-
-static void LoadInternal(DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::CwiqExtension>();
-}
+} // namespace duckdb
 
 DUCKDB_CPP_EXTENSION_ENTRY(cwiq, loader) {
-	duckdb::LoadInternal(loader);
+	duckdb::LoadInternal(loader.GetDatabaseInstance());
 }
-} // namespace duckdb
 
 #ifndef DUCKDB_EXTENSION_MAIN
 #error DUCKDB_EXTENSION_MAIN not defined
