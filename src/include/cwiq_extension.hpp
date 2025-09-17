@@ -57,8 +57,8 @@ private:
 public:
 	S3RedirectProtocolFileSystem(DatabaseInstance &db) : db_instance(db) {};
 
-	DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags,
-	                                           optional_ptr<FileOpener> opener = nullptr) override;
+	unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags,
+	                                optional_ptr<FileOpener> opener = nullptr) override;
 
 	std::string GetName() const override {
 		return "s3redirect";
