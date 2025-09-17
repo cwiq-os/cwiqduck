@@ -110,5 +110,4 @@ public:
 
 S3RedirectInfo ConvertLocalPathToS3(const string &local_path);
 
-}
 } // namespace duckdb
