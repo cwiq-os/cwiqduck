@@ -46,7 +46,7 @@ public:
 	void Write();
 	int64_t Write();
 	void Truncate();
-}
+};
 
 class S3RedirectProtocolFileSystem : public FileSystem {
 private:
@@ -55,12 +55,9 @@ private:
 public:
 	S3RedirectProtocolFileSystem(DatabaseInstance &db) : db_instance(db) {};
 
-	DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags,
-	                                           optional_ptr<FileOpener> opener = nullptr) {
-	}
-	override;
+	DUCKDB_API unique_ptr<FileHandle> OpenFile(const string &path, FileOpenFlags flags, optional_ptr<FileOpener> opener = nullptr) override;
 
-	std::string GetName() const override {return "s3redirect"};
+	std::string GetName() const override {return "s3redirect";};
 	bool FileExists(const string &filename, optional_ptr<FileOpener> opener = nullptr) override;
 	bool CanHandleFile(const string &fpath) override;
 	void Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override;
@@ -78,8 +75,8 @@ public:
 
 	time_t GetLastModifiedTime(FileHandle &handle) override;
 
-	NotImplementedException NotImplemented(const char *where) const {
-		return NotImplementedException(__func__ + "not supported for s3redirect:// protocol");
+	NotImplementedException NotImplemented(const std::string where) const {
+		return NotImplementedException(where + "not supported for s3redirect:// protocol");
 	};
 
 	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override {
@@ -107,11 +104,9 @@ public:
 	void Truncate(FileHandle &handle, int64_t new_size) override {
 		throw NotImplemented(__func__);
 	};
-}
+};
 
-S3RedirectInfo
-ConvertLocalPathToS3(const string &local_path);
-void CwiqExtension::Load(DuckDB &db);
+S3RedirectInfo ConvertLocalPathToS3(const string &local_path);
 
 }
 } // namespace duckdb
