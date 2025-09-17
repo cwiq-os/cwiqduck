@@ -37,15 +37,17 @@ public:
 
 	void Close() override;
 
+	void Read(void *buffer, idx_t nr_bytes, idx_t location);
+	int64_t Read(void *buffer, idx_t nr_bytes);
 	FileHandle &GetS3Handle();
 	FileType GetType();
 	time_t GetLastModifiedTime();
 	idx_t GetFileSize();
 	bool CanSeek();
 	void Sync();
-	void Write();
-	int64_t Write();
-	void Truncate();
+	void Write(void *buffer, idx_t nr_bytes, idx_t location);
+	int64_t Write(void *buffer, idx_t nr_bytes);
+	void Truncate(int64_t new_size);
 };
 
 class S3RedirectProtocolFileSystem : public FileSystem {
