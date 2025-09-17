@@ -62,7 +62,7 @@ FileType S3RedirectFileHandle::GetType() {
 	return GetS3Handle().GetType();
 }
 
-time_t S3RedirectFileHandle::GetLastModifiedTime() {
+timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
 	return last_modified_time;
 }
 
@@ -154,7 +154,7 @@ void S3RedirectProtocolFileSystem::FileSync(FileHandle &handle) {
 	}
 }
 
-time_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
+timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
 	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
 	if (s3_handle) {
 		return s3_handle->GetLastModifiedTime();

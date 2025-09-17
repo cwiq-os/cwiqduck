@@ -13,7 +13,7 @@ public:
 struct S3RedirectInfo {
 	string s3_url;
 	idx_t content_length {0};
-	time_t last_modified_time;
+	timestamp_t last_modified_time;
 };
 
 S3RedirectInfo ConvertLocalPathToS3(const string &local_path);
@@ -22,14 +22,14 @@ class S3RedirectFileHandle : public FileHandle {
 private:
 	string s3_url;
 	idx_t known_content_length;
-	time_t last_modified_time;
+	timestamp_t last_modified_time;
 	unique_ptr<FileHandle> s3_handle;
 	optional_ptr<FileOpener> file_opener;
 	DatabaseInstance &db_instance;
 
 public:
 	S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &s3_url, idx_t content_length,
-	                     time_t last_modified, optional_ptr<FileOpener> opener)
+	                     timestamp_t last_modified, optional_ptr<FileOpener> opener)
 	    : FileHandle(fs, s3_url, FileFlags::FILE_FLAGS_READ), s3_url(s3_url), known_content_length(content_length),
 	      last_modified_time(last_modified), file_opener(opener), db_instance(db) {
 	}
@@ -41,7 +41,7 @@ public:
 	int64_t Read(void *buffer, idx_t nr_bytes);
 	FileHandle &GetS3Handle();
 	FileType GetType();
-	time_t GetLastModifiedTime();
+	timestamp_t GetLastModifiedTime();
 	idx_t GetFileSize();
 	bool CanSeek();
 	void Sync();
@@ -78,7 +78,7 @@ public:
 	FileType GetFileType(FileHandle &handle) override;
 	void FileSync(FileHandle &handle) override;
 
-	time_t GetLastModifiedTime(FileHandle &handle) override;
+	timestamp_t GetLastModifiedTime(FileHandle &handle) override;
 
 	NotImplementedException NotImplemented(const std::string where) const {
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");
