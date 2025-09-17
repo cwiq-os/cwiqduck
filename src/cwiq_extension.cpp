@@ -8,7 +8,6 @@
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
 #ifdef __linux__
@@ -67,7 +66,7 @@ timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
 }
 
 void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes, idx_t location) {
-	return GetS3Handle().Write(buffer, nr_bytes);
+	GetS3Handle().Write(buffer, nr_bytes);
 }
 
 int64_t S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes) {
@@ -218,10 +217,6 @@ S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 #endif
 }
 
-void CwiqExtension::Load(ExtensionLoader &loader) {
-	LoadInternal(loader.GetDatabaseInstance());
-}
-
 std::string CwiqExtension::Name() {
 	return "cwiq";
 }
@@ -252,10 +247,14 @@ static void LoadInternal(DatabaseInstance &db) {
 
 	std::cout << "CWIQ extension enabled" << std::endl;
 
-	auto s3_redirect_fs = make_uniq<S3RedirectProtocolFileSystem>(*db.instance);
+	auto s3_redirect_fs = make_uniq<S3RedirectProtocolFileSystem>(db);
 
 	// Register the filesystem with DuckDB for the s3redirect:// protocol
 	db.GetFileSystem().RegisterSubSystem(std::move(s3_redirect_fs));
+}
+
+void CwiqExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader.GetDatabaseInstance());
 }
 } // namespace duckdb
 
