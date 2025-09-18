@@ -1,6 +1,9 @@
 #pragma once
 
 #include "duckdb.hpp"
+
+#undef MoveFile
+
 namespace duckdb {
 
 class CwiqExtension : public Extension {
