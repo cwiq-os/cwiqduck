@@ -1,7 +1,6 @@
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Configuration of extension
-GEN=ninja
 EXT_NAME=cwiq
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 
