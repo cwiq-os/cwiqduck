@@ -3,6 +3,8 @@
 #include "duckdb.hpp"
 
 #undef MoveFile
+#undef RemoveDirectory
+#undef CreateDirectory
 
 namespace duckdb {
 
