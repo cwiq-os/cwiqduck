@@ -1,7 +1,7 @@
 PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Configuration of extension
-WASM_RULES := wasm_mvp wasm_eh wasm_other
+WASM_RULES := wasm_mvp wasm_eh wasm_threads
 is_wasm_rule = $(filter $(1),$(WASM_TARGETS))
 
 ifeq ($(call is_wasm_rule,$(MAKECMDGOALS)),)
