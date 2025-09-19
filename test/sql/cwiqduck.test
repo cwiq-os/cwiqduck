@@ -1,0 +1,5 @@
+# name: test/sql/cwiqduck.test
+# description: test cwiqduck extension
+# group: [sql]
+
+# tests are disabled for now

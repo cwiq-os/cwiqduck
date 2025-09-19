@@ -8,7 +8,7 @@
 
 namespace duckdb {
 
-class CwiqExtension : public Extension {
+class CwiqduckExtension : public Extension {
 public:
 	void Load(ExtensionLoader &db) override;
 	std::string Name() override;

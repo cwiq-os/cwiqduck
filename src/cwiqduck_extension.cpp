@@ -1,6 +1,6 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include "cwiq_extension.hpp"
+#include "cwiqduck_extension.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
@@ -217,13 +217,13 @@ S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 #endif
 }
 
-std::string CwiqExtension::Name() {
-	return "cwiq";
+std::string CwiqduckExtension::Name() {
+	return "cwiqduck";
 }
 
-std::string CwiqExtension::Version() const {
-#ifdef EXT_VERSION_CWIQ
-	return EXT_VERSION_CWIQ;
+std::string CwiqduckExtension::Version() const {
+#ifdef EXT_VERSION_CWIQDUCK
+	return EXT_VERSION_CWIQDUCK;
 #else
 	return "";
 #endif
@@ -231,7 +231,7 @@ std::string CwiqExtension::Version() const {
 
 static void LoadInternal(DatabaseInstance &db) {
 #ifndef __linux__
-	std::cout << "Error: CWIQ extension not implemented for non-Linux platforms.";
+	std::cout << "Error: cwiqduck extension not implemented for non-Linux platforms.";
 	return;
 #endif
 
@@ -245,7 +245,7 @@ static void LoadInternal(DatabaseInstance &db) {
 		con.Query("LOAD httpfs");
 	}
 
-	std::cout << "CWIQ extension enabled" << std::endl;
+	std::cout << "cwiqduck extension enabled" << std::endl;
 
 	auto s3_redirect_fs = make_uniq<S3RedirectProtocolFileSystem>(db);
 
@@ -253,13 +253,13 @@ static void LoadInternal(DatabaseInstance &db) {
 	db.GetFileSystem().RegisterSubSystem(std::move(s3_redirect_fs));
 }
 
-void CwiqExtension::Load(ExtensionLoader &loader) {
+void CwiqduckExtension::Load(ExtensionLoader &loader) {
 	LoadInternal(loader.GetDatabaseInstance());
 }
 } // namespace duckdb
 
 extern "C" {
-DUCKDB_CPP_EXTENSION_ENTRY(cwiq, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(cwiqduck, loader) {
 	duckdb::LoadInternal(loader.GetDatabaseInstance());
 }
 }

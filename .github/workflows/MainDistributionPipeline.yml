@@ -17,7 +17,7 @@ jobs:
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
       duckdb_version: v1.4.0
-      extension_name: cwiq
+      extension_name: cwiqduck
       ci_tools_version: main
       exclude_archs: "windows_amd64_rtools;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads;osx_amd64;osx_arm64"
 
@@ -28,7 +28,7 @@ jobs:
     with:
       duckdb_version: v1.4.0
       ci_tools_version: v1.4.0
-      extension_name: cwiq
+      extension_name: cwiqduck
       exclude_archs: "windows_amd64_rtools;windows_amd64;windows_amd64_mingw;wasm_mvp;wasm_eh;wasm_threads;osx_amd64;osx_arm64"
 
   code-quality-check:
@@ -37,5 +37,5 @@ jobs:
     with:
       duckdb_version: main # TODO: revert to latest stable probably
       ci_tools_version: main
-      extension_name: cwiq
+      extension_name: cwiqduck
       format_checks: 'format;tidy'
