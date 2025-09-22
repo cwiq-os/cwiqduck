@@ -84,6 +84,7 @@ public:
 	void FileSync(FileHandle &handle) override;
 
 	timestamp_t GetLastModifiedTime(FileHandle &handle) override;
+	vector<OpenFileInfo> Glob(const string &path, FileOpener *opener = nullptr) override;
 
 	NotImplementedException NotImplemented(const std::string where) const {
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");

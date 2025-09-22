@@ -161,6 +161,10 @@ timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
 
+vector<OpenFileInfo> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener = nullptr) {
+	return LocalFileSystem().Glob(path, nullptr);
+}
+
 S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 #ifndef __linux__
 	throw IOException("Failed to read xattr value for " + local_path + ": " + strerror(errno));
