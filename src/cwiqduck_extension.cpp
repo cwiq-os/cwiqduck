@@ -17,6 +17,7 @@
 
 #include <errno.h>
 #include <cstring>
+#include <iostream>
 
 namespace duckdb {
 
@@ -61,7 +62,7 @@ FileType S3RedirectFileHandle::GetType() {
 	return GetS3Handle().GetType();
 }
 
-timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
+time_t S3RedirectFileHandle::GetLastModifiedTime() {
 	return last_modified_time;
 }
 
@@ -153,7 +154,7 @@ void S3RedirectProtocolFileSystem::FileSync(FileHandle &handle) {
 	}
 }
 
-timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
+time_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
 	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
 	if (s3_handle) {
 		return s3_handle->GetLastModifiedTime();
@@ -161,7 +162,7 @@ timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
 
-vector<OpenFileInfo> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
+vector<string> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
 	return LocalFileSystem().Glob(path, nullptr);
 }
 
@@ -257,14 +258,19 @@ static void LoadInternal(DatabaseInstance &db) {
 	db.GetFileSystem().RegisterSubSystem(std::move(s3_redirect_fs));
 }
 
-void CwiqduckExtension::Load(ExtensionLoader &loader) {
-	LoadInternal(loader.GetDatabaseInstance());
+void CwiqduckExtension::Load(DuckDB &db) {
+	LoadInternal(*db.instance);
 }
 } // namespace duckdb
 
 extern "C" {
-DUCKDB_CPP_EXTENSION_ENTRY(cwiqduck, loader) {
-	duckdb::LoadInternal(loader.GetDatabaseInstance());
+DUCKDB_EXTENSION_API void cwiqduck_init(duckdb::DatabaseInstance &db) {
+    duckdb::DuckDB db_wrapper(db);
+    db_wrapper.LoadExtension<duckdb::CwiqduckExtension>();
+}
+
+DUCKDB_EXTENSION_API const char *cwiqduck_version() {
+	return duckdb::DuckDB::LibraryVersion();
 }
 }
 

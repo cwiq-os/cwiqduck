@@ -10,7 +10,7 @@ namespace duckdb {
 
 class CwiqduckExtension : public Extension {
 public:
-	void Load(ExtensionLoader &db) override;
+	void Load(DuckDB &db) override;
 	std::string Name() override;
 	std::string Version() const override;
 };
@@ -18,7 +18,7 @@ public:
 struct S3RedirectInfo {
 	string s3_url;
 	idx_t content_length {0};
-	timestamp_t last_modified_time;
+	time_t last_modified_time;
 };
 
 S3RedirectInfo ConvertLocalPathToS3(const string &local_path);
@@ -27,15 +27,15 @@ class S3RedirectFileHandle : public FileHandle {
 private:
 	string s3_url;
 	idx_t known_content_length;
-	timestamp_t last_modified_time;
+	time_t last_modified_time;
 	unique_ptr<FileHandle> s3_handle;
 	optional_ptr<FileOpener> file_opener;
 	DatabaseInstance &db_instance;
 
 public:
 	S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &s3_url, idx_t content_length,
-	                     timestamp_t last_modified, optional_ptr<FileOpener> opener)
-	    : FileHandle(fs, s3_url, FileFlags::FILE_FLAGS_READ), s3_url(s3_url), known_content_length(content_length),
+	                     time_t last_modified, optional_ptr<FileOpener> opener)
+	    : FileHandle(fs, s3_url), s3_url(s3_url), known_content_length(content_length),
 	      last_modified_time(last_modified), file_opener(opener), db_instance(db) {
 	}
 	virtual ~S3RedirectFileHandle() {};
@@ -46,7 +46,7 @@ public:
 	int64_t Read(void *buffer, idx_t nr_bytes);
 	FileHandle &GetS3Handle();
 	FileType GetType();
-	timestamp_t GetLastModifiedTime();
+	DUCKDB_API time_t GetLastModifiedTime();
 	idx_t GetFileSize();
 	bool CanSeek();
 	void Sync();
@@ -83,8 +83,8 @@ public:
 	FileType GetFileType(FileHandle &handle) override;
 	void FileSync(FileHandle &handle) override;
 
-	timestamp_t GetLastModifiedTime(FileHandle &handle) override;
-	vector<OpenFileInfo> Glob(const string &path, FileOpener *opener = nullptr) override;
+	time_t GetLastModifiedTime(FileHandle &handle) override;
+	vector<string> Glob(const string &path, FileOpener *opener = nullptr) override;
 
 	NotImplementedException NotImplemented(const std::string where) const {
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");
