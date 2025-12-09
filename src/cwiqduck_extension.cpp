@@ -265,8 +265,8 @@ void CwiqduckExtension::Load(DuckDB &db) {
 
 extern "C" {
 DUCKDB_EXTENSION_API void cwiqduck_init(duckdb::DatabaseInstance &db) {
-    duckdb::DuckDB db_wrapper(db);
-    db_wrapper.LoadExtension<duckdb::CwiqduckExtension>();
+	duckdb::DuckDB db_wrapper(db);
+	db_wrapper.LoadExtension<duckdb::CwiqduckExtension>();
 }
 
 DUCKDB_EXTENSION_API const char *cwiqduck_version() {
