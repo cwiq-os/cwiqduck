@@ -4,6 +4,11 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
+// v1.5.3+ wraps the db filesystem in OpenerFileSystem, which auto-injects the opener and
+// rejects an explicit one.  The header didn't exist before v1.5.3.
+#if __has_include("duckdb/common/opener_file_system.hpp")
+#define DUCKDB_HAS_OPENER_FILESYSTEM 1
+#endif
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -25,11 +30,22 @@ S3RedirectFileHandle::S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db,
                                            optional_ptr<FileOpener> opener)
     : FileHandle(fs, url, FileFlags::FILE_FLAGS_READ), s3_url(url), known_content_length(content_length),
       last_modified_time(last_modified), db_instance(db) {
-	// Open eagerly while opener is in scope (credentials are read at OpenFile time by httpfs).
-	// FILE_FLAGS_PARALLEL_ACCESS tells httpfs to bypass its shared rolling buffer and use per-range
-	// GET requests protected by hfh.mu, making concurrent positional reads safe on this handle.
+	// Open eagerly so the handle is ready before any concurrent reader arrives.
+	// FILE_FLAGS_PARALLEL_ACCESS tells httpfs to bypass its shared rolling buffer and issue each
+	// positional read as an independent range GET (protected by hfh.mu post-request), making
+	// concurrent positional reads safe on this single handle.
+	//
+	// Opener handling differs by DuckDB version:
+	//   v1.5.3+  FileSystem::GetFileSystem(db) returns an OpenerFileSystem that auto-injects a
+	//            DatabaseFileOpener and explicitly rejects a caller-supplied opener — pass nullptr.
+	//   v1.4.x   No such wrapper; the opener must be passed explicitly to give httpfs access to
+	//            S3 credentials and HTTP settings.
 	auto &main_fs = FileSystem::GetFileSystem(db);
+#ifdef DUCKDB_HAS_OPENER_FILESYSTEM
+	s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ | FileFlags::FILE_FLAGS_PARALLEL_ACCESS, nullptr);
+#else
 	s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ | FileFlags::FILE_FLAGS_PARALLEL_ACCESS, opener);
+#endif
 }
 
 FileHandle &S3RedirectFileHandle::GetS3Handle() {
