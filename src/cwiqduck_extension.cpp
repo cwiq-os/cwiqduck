@@ -20,13 +20,20 @@
 
 namespace duckdb {
 
-// Lazy-load the actual S3 handle when needed
+S3RedirectFileHandle::S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &url,
+                                           idx_t content_length, timestamp_t last_modified,
+                                           optional_ptr<FileOpener> opener)
+    : FileHandle(fs, url, FileFlags::FILE_FLAGS_READ), s3_url(url), known_content_length(content_length),
+      last_modified_time(last_modified), db_instance(db) {
+	// Open eagerly while opener is in scope (credentials are read at OpenFile time by httpfs).
+	// FILE_FLAGS_PARALLEL_ACCESS tells httpfs to bypass its shared rolling buffer and use per-range
+	// GET requests protected by hfh.mu, making concurrent positional reads safe on this handle.
+	auto &main_fs = FileSystem::GetFileSystem(db);
+	s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ | FileFlags::FILE_FLAGS_PARALLEL_ACCESS, opener);
+}
+
 FileHandle &S3RedirectFileHandle::GetS3Handle() {
-	if (!s3_handle) {
-		// Let DuckDB's httpfs handle the S3 URL
-		auto &main_fs = FileSystem::GetFileSystem(db_instance);
-		s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ, nullptr);
-	}
+	D_ASSERT(s3_handle);
 	return *s3_handle;
 }
 
@@ -131,6 +138,14 @@ void S3RedirectProtocolFileSystem::Seek(FileHandle &handle, idx_t location) {
 	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
 	if (s3_handle) {
 		return s3_handle->GetS3Handle().Seek(location);
+	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
+
+idx_t S3RedirectProtocolFileSystem::SeekPosition(FileHandle &handle) {
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->GetS3Handle().SeekPosition();
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }

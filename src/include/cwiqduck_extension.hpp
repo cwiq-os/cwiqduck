@@ -28,16 +28,15 @@ private:
 	string s3_url;
 	idx_t known_content_length;
 	timestamp_t last_modified_time;
+	// Opened eagerly at construction time with FILE_FLAGS_PARALLEL_ACCESS so httpfs routes every
+	// positional Read through its per-handle mutex-protected range-request path (httpfs.cpp:372-383),
+	// making concurrent positional reads safe on this single handle.
 	unique_ptr<FileHandle> s3_handle;
-	optional_ptr<FileOpener> file_opener;
 	DatabaseInstance &db_instance;
 
 public:
 	S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &s3_url, idx_t content_length,
-	                     timestamp_t last_modified, optional_ptr<FileOpener> opener)
-	    : FileHandle(fs, s3_url, FileFlags::FILE_FLAGS_READ), s3_url(s3_url), known_content_length(content_length),
-	      last_modified_time(last_modified), file_opener(opener), db_instance(db) {
-	}
+	                     timestamp_t last_modified, optional_ptr<FileOpener> opener);
 	virtual ~S3RedirectFileHandle() {};
 
 	void Close() override;
@@ -79,6 +78,7 @@ public:
 		return false;
 	};
 	void Seek(FileHandle &handle, idx_t location) override;
+	idx_t SeekPosition(FileHandle &handle) override;
 	int64_t GetFileSize(FileHandle &handle) override;
 	FileType GetFileType(FileHandle &handle) override;
 	void FileSync(FileHandle &handle) override;
