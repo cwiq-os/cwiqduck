@@ -4,6 +4,11 @@
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/file_opener.hpp"
+// v1.5.3+ wraps the db filesystem in OpenerFileSystem, which auto-injects the opener and
+// rejects an explicit one.  The header didn't exist before v1.5.3.
+#if __has_include("duckdb/common/opener_file_system.hpp")
+#define DUCKDB_HAS_OPENER_FILESYSTEM 1
+#endif
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -20,14 +25,62 @@
 
 namespace duckdb {
 
-// Lazy-load the actual S3 handle when needed
-FileHandle &S3RedirectFileHandle::GetS3Handle() {
-	if (!s3_handle) {
-		// Let DuckDB's httpfs handle the S3 URL
-		auto &main_fs = FileSystem::GetFileSystem(db_instance);
-		s3_handle = main_fs.OpenFile(s3_url, FileFlags::FILE_FLAGS_READ, nullptr);
+// ---------------------------------------------------------------------------
+// S3RedirectFileHandle — pool internals
+// ---------------------------------------------------------------------------
+
+unique_ptr<FileHandle> S3RedirectFileHandle::OpenHandle() const {
+	// Plain read flags: correctness comes from the pool's exclusive-ownership model
+	// (no two threads share a handle's mutable state), not from any httpfs-internal flag.
+	auto flags = FileFlags::FILE_FLAGS_READ;
+	auto &main_fs = FileSystem::GetFileSystem(db_instance);
+#ifdef DUCKDB_HAS_OPENER_FILESYSTEM
+	// v1.5.3+: DatabaseFileSystem (OpenerFileSystem) auto-injects the db-level opener
+	// and explicitly rejects a caller-supplied one.
+	return main_fs.OpenFile(s3_url, flags, nullptr);
+#else
+	// v1.4.x: no auto-injection; pass the opener so httpfs can read S3 credentials.
+	return main_fs.OpenFile(s3_url, flags, file_opener);
+#endif
+}
+
+S3RedirectFileHandle::BorrowedHandle S3RedirectFileHandle::BorrowHandle() {
+	{
+		std::lock_guard<std::mutex> lk(pool_mu);
+		if (!idle_pool.empty()) {
+			auto h = std::move(idle_pool.back());
+			idle_pool.pop_back();
+			return BorrowedHandle(*this, std::move(h));
+		}
 	}
-	return *s3_handle;
+	// Pool empty: open a new handle without holding the lock (avoids blocking
+	// other threads returning handles while a HEAD/GET is in flight).
+	return BorrowedHandle(*this, OpenHandle());
+}
+
+void S3RedirectFileHandle::ReturnHandle(unique_ptr<FileHandle> h) {
+	std::lock_guard<std::mutex> lk(pool_mu);
+	idle_pool.push_back(std::move(h));
+}
+
+// ---------------------------------------------------------------------------
+// S3RedirectFileHandle — public interface
+// ---------------------------------------------------------------------------
+
+S3RedirectFileHandle::S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &url,
+                                           idx_t content_length, timestamp_t last_modified,
+                                           optional_ptr<FileOpener> opener)
+    : FileHandle(fs, url, FileFlags::FILE_FLAGS_READ), s3_url(url), known_content_length(content_length),
+      last_modified_time(last_modified), db_instance(db), file_opener(opener) {
+	// Open the primary handle eagerly (sequential cursor / metadata ops).
+	// This also validates the S3 URL and credentials at open time rather than
+	// deferring errors to the first read.
+	primary_handle = OpenHandle();
+}
+
+FileHandle &S3RedirectFileHandle::GetPrimaryHandle() {
+	D_ASSERT(primary_handle);
+	return *primary_handle;
 }
 
 idx_t S3RedirectFileHandle::GetFileSize() {
@@ -35,17 +88,28 @@ idx_t S3RedirectFileHandle::GetFileSize() {
 }
 
 void S3RedirectFileHandle::Close() {
-	if (s3_handle) {
-		s3_handle->Close();
+	if (primary_handle) {
+		primary_handle->Close();
 	}
+	std::lock_guard<std::mutex> lk(pool_mu);
+	for (auto &h : idle_pool) {
+		if (h) {
+			h->Close();
+		}
+	}
+	idle_pool.clear();
 }
 
+// Positional read: borrow an exclusive handle from the pool so no two threads
+// share any mutable handle state regardless of how the underlying httpfs is implemented.
 void S3RedirectFileHandle::Read(void *buffer, idx_t nr_bytes, idx_t location) {
-	return GetS3Handle().Read(buffer, nr_bytes, location);
+	auto borrowed = BorrowHandle();
+	borrowed.get().Read(buffer, nr_bytes, location);
 }
 
+// Sequential read: uses the primary handle (single-threaded sequential access path).
 int64_t S3RedirectFileHandle::Read(void *buffer, idx_t nr_bytes) {
-	return GetS3Handle().Read(buffer, nr_bytes);
+	return GetPrimaryHandle().Read(buffer, nr_bytes);
 }
 
 bool S3RedirectFileHandle::CanSeek() {
@@ -53,12 +117,13 @@ bool S3RedirectFileHandle::CanSeek() {
 }
 
 void S3RedirectFileHandle::Sync() {
-	if (s3_handle)
-		s3_handle->Sync();
+	if (primary_handle) {
+		primary_handle->Sync();
+	}
 }
 
 FileType S3RedirectFileHandle::GetType() {
-	return GetS3Handle().GetType();
+	return GetPrimaryHandle().GetType();
 }
 
 timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
@@ -66,16 +131,20 @@ timestamp_t S3RedirectFileHandle::GetLastModifiedTime() {
 }
 
 void S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes, idx_t location) {
-	GetS3Handle().Write(buffer, nr_bytes);
+	GetPrimaryHandle().Write(buffer, nr_bytes);
 }
 
 int64_t S3RedirectFileHandle::Write(void *buffer, idx_t nr_bytes) {
-	return GetS3Handle().Write(buffer, nr_bytes);
+	return GetPrimaryHandle().Write(buffer, nr_bytes);
 }
 
 void S3RedirectFileHandle::Truncate(int64_t new_size) {
-	return GetS3Handle().Truncate(new_size);
+	return GetPrimaryHandle().Truncate(new_size);
 }
+
+// ---------------------------------------------------------------------------
+// S3RedirectProtocolFileSystem
+// ---------------------------------------------------------------------------
 
 unique_ptr<FileHandle> S3RedirectProtocolFileSystem::OpenFile(const string &path, FileOpenFlags flags,
                                                               optional_ptr<FileOpener> opener) {
@@ -111,34 +180,45 @@ bool S3RedirectProtocolFileSystem::CanHandleFile(const string &fpath) {
 #endif
 }
 
+// Positional read: delegates to S3RedirectFileHandle::Read(buf,n,loc) which
+// borrows an exclusive pool handle — no shared mutable state between callers.
 void S3RedirectProtocolFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) {
-	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-	if (s3_handle) {
-		return s3_handle->GetS3Handle().Read(buffer, nr_bytes, location);
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->Read(buffer, nr_bytes, location);
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
 
+// Sequential read: uses the primary handle.
 int64_t S3RedirectProtocolFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes) {
-	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-	if (s3_handle) {
-		return s3_handle->GetS3Handle().Read(buffer, nr_bytes);
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->Read(buffer, nr_bytes);
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
 
 void S3RedirectProtocolFileSystem::Seek(FileHandle &handle, idx_t location) {
-	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-	if (s3_handle) {
-		return s3_handle->GetS3Handle().Seek(location);
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->GetPrimaryHandle().Seek(location);
+	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
+
+idx_t S3RedirectProtocolFileSystem::SeekPosition(FileHandle &handle) {
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->GetPrimaryHandle().SeekPosition();
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
 
 int64_t S3RedirectProtocolFileSystem::GetFileSize(FileHandle &handle) {
-	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-	if (s3_handle) {
-		return s3_handle->GetFileSize();
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->GetFileSize();
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
@@ -148,15 +228,15 @@ FileType S3RedirectProtocolFileSystem::GetFileType(FileHandle &handle) {
 }
 
 void S3RedirectProtocolFileSystem::FileSync(FileHandle &handle) {
-	if (auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle)) {
-		s3_handle->Sync();
+	if (auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle)) {
+		h->Sync();
 	}
 }
 
 timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
-	auto s3_handle = dynamic_cast<S3RedirectFileHandle *>(&handle);
-	if (s3_handle) {
-		return s3_handle->GetLastModifiedTime();
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		return h->GetLastModifiedTime();
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
@@ -164,6 +244,10 @@ timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle
 vector<OpenFileInfo> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
 	return LocalFileSystem().Glob(path, nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// ConvertLocalPathToS3
+// ---------------------------------------------------------------------------
 
 S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 #ifndef __linux__
@@ -220,6 +304,10 @@ S3RedirectInfo ConvertLocalPathToS3(const string &local_path) {
 	return info;
 #endif
 }
+
+// ---------------------------------------------------------------------------
+// Extension entry points
+// ---------------------------------------------------------------------------
 
 std::string CwiqduckExtension::Name() {
 	return "cwiqduck";
