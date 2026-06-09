@@ -13,6 +13,7 @@
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/logging/log_manager.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
 #ifdef __linux__
@@ -30,6 +31,7 @@ namespace duckdb {
 // ---------------------------------------------------------------------------
 
 unique_ptr<FileHandle> S3RedirectFileHandle::OpenHandle() const {
+	CWIQ_LOG_DEBUG(db_instance, "OpenHandle: opening S3 connection for %s", s3_url);
 	// Plain read flags: correctness comes from the pool's exclusive-ownership model
 	// (no two threads share a handle's mutable state), not from any httpfs-internal flag.
 	auto flags = FileFlags::FILE_FLAGS_READ;
@@ -55,12 +57,14 @@ S3RedirectFileHandle::BorrowedHandle S3RedirectFileHandle::BorrowHandle() {
 	}
 	// Pool empty: open a new handle without holding the lock (avoids blocking
 	// other threads returning handles while a HEAD/GET is in flight).
+	CWIQ_LOG_DEBUG(db_instance, "BorrowHandle: pool miss, opening new handle for %s", s3_url);
 	return BorrowedHandle(*this, OpenHandle());
 }
 
 void S3RedirectFileHandle::ReturnHandle(unique_ptr<FileHandle> h) {
 	std::lock_guard<std::mutex> lk(pool_mu);
 	idle_pool.push_back(std::move(h));
+	CWIQ_LOG_DEBUG(db_instance, "ReturnHandle: pool size now %s for %s", std::to_string(idle_pool.size()), s3_url);
 }
 
 // ---------------------------------------------------------------------------
@@ -103,12 +107,14 @@ void S3RedirectFileHandle::Close() {
 // Positional read: borrow an exclusive handle from the pool so no two threads
 // share any mutable handle state regardless of how the underlying httpfs is implemented.
 void S3RedirectFileHandle::Read(void *buffer, idx_t nr_bytes, idx_t location) {
+	CWIQ_LOG_TRACE(db_instance, "Read: %s bytes @ offset %s", std::to_string(nr_bytes), std::to_string(location));
 	auto borrowed = BorrowHandle();
 	borrowed.get().Read(buffer, nr_bytes, location);
 }
 
 // Sequential read: uses the primary handle (single-threaded sequential access path).
 int64_t S3RedirectFileHandle::Read(void *buffer, idx_t nr_bytes) {
+	CWIQ_LOG_TRACE(db_instance, "Read: %s bytes (sequential)", std::to_string(nr_bytes));
 	return GetPrimaryHandle().Read(buffer, nr_bytes);
 }
 
@@ -148,8 +154,17 @@ void S3RedirectFileHandle::Truncate(int64_t new_size) {
 
 unique_ptr<FileHandle> S3RedirectProtocolFileSystem::OpenFile(const string &path, FileOpenFlags flags,
                                                               optional_ptr<FileOpener> opener) {
+	// Writes are not redirectable — the S3 target is read-only. Fall back to the real
+	// on-disk file on the CWIQ FS mount so the kernel/mount handles persistence. The
+	// returned handle references local_fs, so all later ops bypass this FS entirely
+	// (including the read side of a READ|WRITE open).
+	if (flags.OpenForWriting()) {
+		CWIQ_LOG_DEBUG(db_instance, "OpenFile: %s opened for writing, falling back to local FS", path);
+		return local_fs.OpenFile(path, flags, opener);
+	}
 	try {
 		auto s3_info = ConvertLocalPathToS3(path);
+		CWIQ_LOG_INFO(db_instance, "OpenFile: redirecting %s to S3", path);
 		return make_uniq<S3RedirectFileHandle>(*this, db_instance, s3_info.s3_url, s3_info.content_length,
 		                                       s3_info.last_modified_time, opener);
 	} catch (const std::exception &e) {
@@ -242,7 +257,7 @@ timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle
 }
 
 vector<OpenFileInfo> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
-	return LocalFileSystem().Glob(path, nullptr);
+	return local_fs.Glob(path, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +353,15 @@ static void LoadInternal(DatabaseInstance &db) {
 	}
 
 	std::cout << "cwiqduck extension enabled" << std::endl;
+
+	// Register our native log type so users can scope logging via `CALL enable_logging('cwiqduck')`
+	// and filter duckdb_logs by log_type. RegisterLogType throws on a duplicate (e.g. reload), so
+	// swallow that and keep going.
+	try {
+		db.GetLogManager().RegisterLogType(make_uniq<CwiqduckLogType>());
+	} catch (const std::exception &) {
+		// Already registered — nothing to do.
+	}
 
 	auto s3_redirect_fs = make_uniq<S3RedirectProtocolFileSystem>(db);
 
