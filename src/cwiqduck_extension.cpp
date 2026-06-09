@@ -148,6 +148,13 @@ void S3RedirectFileHandle::Truncate(int64_t new_size) {
 
 unique_ptr<FileHandle> S3RedirectProtocolFileSystem::OpenFile(const string &path, FileOpenFlags flags,
                                                               optional_ptr<FileOpener> opener) {
+	// Writes are not redirectable — the S3 target is read-only. Fall back to the real
+	// on-disk file on the CWIQ FS mount so the kernel/mount handles persistence. The
+	// returned handle references local_fs, so all later ops bypass this FS entirely
+	// (including the read side of a READ|WRITE open).
+	if (flags.OpenForWriting()) {
+		return local_fs.OpenFile(path, flags, opener);
+	}
 	try {
 		auto s3_info = ConvertLocalPathToS3(path);
 		return make_uniq<S3RedirectFileHandle>(*this, db_instance, s3_info.s3_url, s3_info.content_length,
@@ -242,7 +249,7 @@ timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle
 }
 
 vector<OpenFileInfo> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
-	return LocalFileSystem().Glob(path, nullptr);
+	return local_fs.Glob(path, nullptr);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb/common/local_file_system.hpp"
 
 #include <mutex>
 #include <vector>
@@ -103,6 +104,9 @@ public:
 class S3RedirectProtocolFileSystem : public FileSystem {
 private:
 	DatabaseInstance &db_instance;
+	// Fallback FS for write-flagged opens. Owned for the DB's lifetime so any
+	// local handle it produces (which keeps a reference back to it) stays valid.
+	LocalFileSystem local_fs;
 
 public:
 	S3RedirectProtocolFileSystem(DatabaseInstance &db) : db_instance(db) {};
