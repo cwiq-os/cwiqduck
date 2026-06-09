@@ -2,4 +2,13 @@
 # description: test cwiqduck extension
 # group: [sql]
 
-# tests are disabled for now
+require cwiqduck
+
+# The 'cwiqduck' log type must be registered at load time. enable_logging() routes a named
+# type through SetEnableStructuredLoggers, which throws "Unknown log type" if it is not
+# registered, so this succeeding is a real assertion that LoadInternal registered the type.
+statement ok
+CALL enable_logging('cwiqduck');
+
+# Redirect-redirected reads need a CWIQ FS mount (xattr-backed file), which CI does not have,
+# so end-to-end log-message assertions are a manual/local step against a real mount.

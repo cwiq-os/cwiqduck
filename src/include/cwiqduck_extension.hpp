@@ -2,6 +2,7 @@
 
 #include "duckdb.hpp"
 #include "duckdb/common/local_file_system.hpp"
+#include "duckdb/logging/logger.hpp"
 
 #include <mutex>
 #include <vector>
@@ -11,6 +12,24 @@
 #undef CreateDirectory
 
 namespace duckdb {
+
+// Native DuckDB log type for this extension. Registering it (see LoadInternal) lets users
+// scope logging to just our messages via `CALL enable_logging('cwiqduck')`, and surfaces
+// them in duckdb_logs with log_type = 'cwiqduck'. Unstructured (VARCHAR message).
+class CwiqduckLogType : public LogType {
+public:
+	static constexpr const char *NAME = "cwiqduck";
+	// Floor applied when the type is enabled via enable_logging('cwiqduck'); TRACE => everything.
+	static constexpr LogLevel LEVEL = LogLevel::LOG_TRACE;
+	CwiqduckLogType() : LogType(NAME, LEVEL) {
+	}
+};
+
+// Level-specific loggers that keep log_type = "cwiqduck". A LogType carries a single LEVEL,
+// so we go through DUCKDB_LOG_INTERNAL directly to vary the level per call site.
+#define CWIQ_LOG_INFO(SRC, ...)  DUCKDB_LOG_INTERNAL(SRC, CwiqduckLogType::NAME, LogLevel::LOG_INFO, __VA_ARGS__)
+#define CWIQ_LOG_DEBUG(SRC, ...) DUCKDB_LOG_INTERNAL(SRC, CwiqduckLogType::NAME, LogLevel::LOG_DEBUG, __VA_ARGS__)
+#define CWIQ_LOG_TRACE(SRC, ...) DUCKDB_LOG_INTERNAL(SRC, CwiqduckLogType::NAME, LogLevel::LOG_TRACE, __VA_ARGS__)
 
 class CwiqduckExtension : public Extension {
 public:
