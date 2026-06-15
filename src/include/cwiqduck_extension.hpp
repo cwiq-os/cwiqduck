@@ -2,7 +2,22 @@
 
 #include "duckdb.hpp"
 #include "duckdb/common/local_file_system.hpp"
+
+// Capability detection for the DuckDB version straddle. v1.1.2 predates all three of these
+// headers; v1.4.0+ ships them. Each gates a chunk of API that moved between those versions:
+//   - extension_loader.hpp : Extension::Load(ExtensionLoader&) + DUCKDB_CPP_EXTENSION_ENTRY
+//   - logging/logger.hpp   : the native LogType / DUCKDB_LOG_INTERNAL logging API
+//   - open_file_info.hpp   : Glob() returns vector<OpenFileInfo> instead of vector<string>
+#if __has_include("duckdb/main/extension/extension_loader.hpp")
+#define CWIQ_HAS_EXTENSION_LOADER 1
+#endif
+#if __has_include("duckdb/logging/logger.hpp")
 #include "duckdb/logging/logger.hpp"
+#define CWIQ_HAS_LOGGING 1
+#endif
+#if __has_include("duckdb/common/open_file_info.hpp")
+#define CWIQ_HAS_OPEN_FILE_INFO 1
+#endif
 
 #include <mutex>
 #include <vector>
@@ -13,6 +28,7 @@
 
 namespace duckdb {
 
+#ifdef CWIQ_HAS_LOGGING
 // Native DuckDB log type for this extension. Registering it (see LoadInternal) lets users
 // scope logging to just our messages via `CALL enable_logging('cwiqduck')`, and surfaces
 // them in duckdb_logs with log_type = 'cwiqduck'. Unstructured (VARCHAR message).
@@ -30,10 +46,20 @@ public:
 #define CWIQ_LOG_INFO(SRC, ...)  DUCKDB_LOG_INTERNAL(SRC, CwiqduckLogType::NAME, LogLevel::LOG_INFO, __VA_ARGS__)
 #define CWIQ_LOG_DEBUG(SRC, ...) DUCKDB_LOG_INTERNAL(SRC, CwiqduckLogType::NAME, LogLevel::LOG_DEBUG, __VA_ARGS__)
 #define CWIQ_LOG_TRACE(SRC, ...) DUCKDB_LOG_INTERNAL(SRC, CwiqduckLogType::NAME, LogLevel::LOG_TRACE, __VA_ARGS__)
+#else
+// v1.1.2 has no native logging API — compile the call sites away entirely.
+#define CWIQ_LOG_INFO(...)  ((void)0)
+#define CWIQ_LOG_DEBUG(...) ((void)0)
+#define CWIQ_LOG_TRACE(...) ((void)0)
+#endif
 
 class CwiqduckExtension : public Extension {
 public:
+#ifdef CWIQ_HAS_EXTENSION_LOADER
 	void Load(ExtensionLoader &db) override;
+#else
+	void Load(DuckDB &db) override;
+#endif
 	std::string Name() override;
 	std::string Version() const override;
 };
@@ -152,8 +178,18 @@ public:
 	FileType GetFileType(FileHandle &handle) override;
 	void FileSync(FileHandle &handle) override;
 
+#ifdef CWIQ_HAS_EXTENSION_LOADER
 	timestamp_t GetLastModifiedTime(FileHandle &handle) override;
+#else
+	// v1.1.2: the base virtual returns time_t (seconds), not timestamp_t.
+	time_t GetLastModifiedTime(FileHandle &handle) override;
+#endif
+#ifdef CWIQ_HAS_OPEN_FILE_INFO
 	vector<OpenFileInfo> Glob(const string &path, FileOpener *opener = nullptr) override;
+#else
+	// v1.1.2: Glob returns plain paths; OpenFileInfo did not exist yet.
+	vector<string> Glob(const string &path, FileOpener *opener = nullptr) override;
+#endif
 
 	NotImplementedException NotImplemented(const std::string where) const {
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");

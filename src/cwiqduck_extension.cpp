@@ -13,7 +13,9 @@
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#ifdef CWIQ_HAS_LOGGING
 #include "duckdb/logging/log_manager.hpp"
+#endif
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
 #ifdef __linux__
@@ -23,6 +25,8 @@
 
 #include <errno.h>
 #include <cstring>
+// Newer duckdb.hpp pulls in <iostream> transitively; v1.1.2 does not, and LoadInternal uses std::cout.
+#include <iostream>
 
 namespace duckdb {
 
@@ -74,8 +78,15 @@ void S3RedirectFileHandle::ReturnHandle(unique_ptr<FileHandle> h) {
 S3RedirectFileHandle::S3RedirectFileHandle(FileSystem &fs, DatabaseInstance &db, const string &url,
                                            idx_t content_length, timestamp_t last_modified,
                                            optional_ptr<FileOpener> opener)
-    : FileHandle(fs, url, FileFlags::FILE_FLAGS_READ), s3_url(url), known_content_length(content_length),
-      last_modified_time(last_modified), db_instance(db), file_opener(opener) {
+    :
+#ifdef CWIQ_HAS_EXTENSION_LOADER
+      FileHandle(fs, url, FileFlags::FILE_FLAGS_READ),
+#else
+      // v1.1.2 FileHandle has no flags parameter.
+      FileHandle(fs, url),
+#endif
+      s3_url(url), known_content_length(content_length), last_modified_time(last_modified), db_instance(db),
+      file_opener(opener) {
 	// Open the primary handle eagerly (sequential cursor / metadata ops).
 	// This also validates the S3 URL and credentials at open time rather than
 	// deferring errors to the first read.
@@ -248,6 +259,7 @@ void S3RedirectProtocolFileSystem::FileSync(FileHandle &handle) {
 	}
 }
 
+#ifdef CWIQ_HAS_EXTENSION_LOADER
 timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
 	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
 	if (h) {
@@ -255,10 +267,27 @@ timestamp_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle
 	}
 	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
 }
+#else
+time_t S3RedirectProtocolFileSystem::GetLastModifiedTime(FileHandle &handle) {
+	auto *h = dynamic_cast<S3RedirectFileHandle *>(&handle);
+	if (h) {
+		// The stored timestamp holds the local inode's st_mtime (epoch seconds); hand that
+		// raw second count back as the time_t the v1.1.2 base virtual expects.
+		return static_cast<time_t>(h->GetLastModifiedTime().value);
+	}
+	throw InternalException("Invalid handle type in S3RedirectProtocolFileSystem");
+}
+#endif
 
+#ifdef CWIQ_HAS_OPEN_FILE_INFO
 vector<OpenFileInfo> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
 	return local_fs.Glob(path, nullptr);
 }
+#else
+vector<string> S3RedirectProtocolFileSystem::Glob(const string &path, FileOpener *opener) {
+	return local_fs.Glob(path, nullptr);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // ConvertLocalPathToS3
@@ -354,14 +383,16 @@ static void LoadInternal(DatabaseInstance &db) {
 
 	std::cout << "cwiqduck extension enabled" << std::endl;
 
+#ifdef CWIQ_HAS_LOGGING
 	// Register our native log type so users can scope logging via `CALL enable_logging('cwiqduck')`
 	// and filter duckdb_logs by log_type. RegisterLogType throws on a duplicate (e.g. reload), so
-	// swallow that and keep going.
+	// swallow that and keep going. v1.1.2 has no log manager, so this is skipped there.
 	try {
 		db.GetLogManager().RegisterLogType(make_uniq<CwiqduckLogType>());
 	} catch (const std::exception &) {
 		// Already registered — nothing to do.
 	}
+#endif
 
 	auto s3_redirect_fs = make_uniq<S3RedirectProtocolFileSystem>(db);
 
@@ -369,15 +400,36 @@ static void LoadInternal(DatabaseInstance &db) {
 	db.GetFileSystem().RegisterSubSystem(std::move(s3_redirect_fs));
 }
 
+#ifdef CWIQ_HAS_EXTENSION_LOADER
 void CwiqduckExtension::Load(ExtensionLoader &loader) {
 	LoadInternal(loader.GetDatabaseInstance());
 }
+#else
+// v1.1.2: the loader-based API does not exist; Load takes the DuckDB wrapper and the
+// DatabaseInstance is reached via its `instance` shared_ptr.
+void CwiqduckExtension::Load(DuckDB &db) {
+	LoadInternal(*db.instance);
+}
+#endif
 } // namespace duckdb
 
 extern "C" {
+#ifdef CWIQ_HAS_EXTENSION_LOADER
 DUCKDB_CPP_EXTENSION_ENTRY(cwiqduck, loader) {
 	duckdb::LoadInternal(loader.GetDatabaseInstance());
 }
+#else
+// v1.1.2 C ABI entry points: <name>_init loads the extension, <name>_version reports the
+// DuckDB version it was built against (used by the loader's compatibility check).
+DUCKDB_EXTENSION_API void cwiqduck_init(duckdb::DatabaseInstance &db) {
+	duckdb::DuckDB db_wrapper(db);
+	db_wrapper.LoadExtension<duckdb::CwiqduckExtension>();
+}
+
+DUCKDB_EXTENSION_API const char *cwiqduck_version() {
+	return duckdb::DuckDB::LibraryVersion();
+}
+#endif
 }
 
 #ifndef DUCKDB_EXTENSION_MAIN
