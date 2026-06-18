@@ -159,30 +159,37 @@ public:
 		return NotImplementedException(where + "not supported for s3redirect:// protocol");
 	};
 
+	// Handle-based write ops have no local fd to fall back to: write-flagged opens already
+	// redirect to local_fs at OpenFile() and return a local handle that bypasses this FS, so
+	// these only ever receive the read-only S3 redirect handle. The S3 target is read-only.
 	void Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx_t location) override {
-		throw NotImplemented(__func__);
-	};
-	void CreateDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplemented(__func__);
-	};
-	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplemented(__func__);
-	};
-	void RemoveDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplemented(__func__);
-	};
-	void RemoveFile(const string &filename, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplemented(__func__);
-	};
-	void MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener = nullptr) override {
-		throw NotImplemented(__func__);
-	};
-	bool ListFiles(const string &directory, const std::function<void(const string &, bool)> &callback,
-	               FileOpener *opener = nullptr) override {
 		throw NotImplemented(__func__);
 	};
 	void Truncate(FileHandle &handle, int64_t new_size) override {
 		throw NotImplemented(__func__);
+	};
+
+	// Path-based directory/file ops fall back to the real on-disk path on the CWIQ FS mount.
+	// File *contents* stay read-only (reads redirect to S3), but namespace mutations on the
+	// mount are handled by the kernel/local FS.
+	void CreateDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
+		local_fs.CreateDirectory(directory, opener);
+	};
+	bool DirectoryExists(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
+		return local_fs.DirectoryExists(directory, opener);
+	};
+	void RemoveDirectory(const string &directory, optional_ptr<FileOpener> opener = nullptr) override {
+		local_fs.RemoveDirectory(directory, opener);
+	};
+	void RemoveFile(const string &filename, optional_ptr<FileOpener> opener = nullptr) override {
+		local_fs.RemoveFile(filename, opener);
+	};
+	void MoveFile(const string &source, const string &target, optional_ptr<FileOpener> opener = nullptr) override {
+		local_fs.MoveFile(source, target, opener);
+	};
+	bool ListFiles(const string &directory, const std::function<void(const string &, bool)> &callback,
+	               FileOpener *opener = nullptr) override {
+		return local_fs.ListFiles(directory, callback, opener);
 	};
 };
 

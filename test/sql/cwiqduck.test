@@ -10,5 +10,7 @@ require cwiqduck
 statement ok
 CALL enable_logging('cwiqduck');
 
-# Redirect-redirected reads need a CWIQ FS mount (xattr-backed file), which CI does not have,
-# so end-to-end log-message assertions are a manual/local step against a real mount.
+# The redirect/read/write behaviour needs an xattr-backed file + an S3 target, which CI
+# does not have. The C++ unit tests in test/cpp/test_cwiqduck.cpp exercise those paths
+# against the LD_PRELOAD getxattr mock + file:// fixtures; run them via `make test_mock`
+# (or test/run_with_mock.sh).
